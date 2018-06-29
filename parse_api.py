@@ -58,7 +58,7 @@ def get_text_size(text):
     font_scale = 0.5
     margin = 1
     thickness = 1
-    color = (255, 255, 255)
+    # color = (255, 255, 255)
     size = cv2.getTextSize(text, font, font_scale, thickness)
 
     text_width = size[0][0]
@@ -70,31 +70,31 @@ def get_text_size(text):
 def IoU(Reframe, GTframe):
     """ 自定义函数，计算两矩形 IOU，传入为均为矩形对角线，（x,y）坐标。
     """
-    x1 = Reframe[0];
-    y1 = Reframe[1];
-    width1 = Reframe[2] - Reframe[0];
-    height1 = Reframe[3] - Reframe[1];
+    x1 = Reframe[0]
+    y1 = Reframe[1]
+    width1 = Reframe[2] - Reframe[0]
+    height1 = Reframe[3] - Reframe[1]
 
-    x2 = GTframe[0];
-    y2 = GTframe[1];
-    width2 = GTframe[2] - GTframe[0];
-    height2 = GTframe[3] - GTframe[1];
+    x2 = GTframe[0]
+    y2 = GTframe[1]
+    width2 = GTframe[2] - GTframe[0]
+    height2 = GTframe[3] - GTframe[1]
 
-    endx = max(x1+width1,x2+width2);
-    startx = min(x1,x2);
-    width = width1+width2-(endx-startx);
+    endx = max(x1+width1,x2+width2)
+    startx = min(x1,x2)
+    width = width1+width2-(endx-startx)
 
-    endy = max(y1+height1,y2+height2);
-    starty = min(y1,y2);
-    height = height1+height2-(endy-starty);
+    endy = max(y1+height1,y2+height2)
+    starty = min(y1,y2)
+    height = height1+height2-(endy-starty)
 
     if width <=0 or height <= 0:
         ratio = 0 # 重叠率为 0 
     else:
-        Area = width*height; # 两矩形相交面积
-        Area1 = width1*height1; 
-        Area2 = width2*height2;
-        ratio = Area*1./(Area1+Area2-Area);
+        Area = width*height # 两矩形相交面积
+        Area1 = width1*height1
+        Area2 = width2*height2
+        ratio = Area*1./(Area1+Area2-Area)
     # return IOU
 
     # 更新判断指标，矩形的长、宽应该接近和类似
@@ -133,15 +133,15 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
     # ||| |.||| ||| |||| ||.| || ||||| ||||| ||| || |||||| ||.| ||| |.|||.||
     # My -nome -is -Tang- Li . I- was -born -in -a -small -torn- in- Zhejing
     # break_idx = [2, 8, 12, 19, 22, 24, 27, 31, 37, 41, 44, 51, 58, 62]
-
+    
     align1_copy = list(align1)
     align2_copy = list(align2)
     for idx in break_idx:
-        align1_copy[idx] = '#'
-        align2_copy[idx] = '#'
+        align1_copy[idx] = '&'
+        align2_copy[idx] = '&'
     align1_copy = ''.join(align1_copy)
     align2_copy = ''.join(align2_copy)
-
+    
     # 单词匹配与矫正算法
     # 1. 如 a == b，正确通过
     # 2. 如 a, b 有一方为标点，另一方为 -，取标点
@@ -152,35 +152,43 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
     LIST_punts = ['.', ',', '?', '!']
     correct_sent = list()
     word_idx = 0
-    for a, b in zip(align1_copy.split('#'), align2_copy.split('#')):
-
+    word_count = len(align1_copy.split('&'))
+    for index, (a, b) in enumerate(zip(align1_copy.split('&'), align2_copy.split('&'))):
+        # a ---> api word
+        # b ---> ocr word
+        a = a.replace('-', '')
+        b = b.replace('-', '')
+        # print a,b
         if a == b == '': continue
         if a == b:
             correct_sent.append(a)
-            if a == b == '-': word_idx -= 1     # 如两者相等，则去除 - 对 word_idx 影响（我们自己 API 容易漏 -）
-        elif a == '-' and b in LIST_punts:
+        elif a == '' and b in LIST_punts:
             correct_sent.append(b)
-        elif a in LIST_punts and b == '-':
+        elif a in LIST_punts and b == '':
+            word_idx = max(0, word_idx - 1)
             correct_sent.append(a)
         elif '|' in a or '|' in b:
             if '|' in b[0 : int(0.5 * len(b))]:
                 correct_sent.append('|')
-                correct_sent.append(b.replace('|', '').replace('-', ''))
+                correct_sent.append(b.replace('|', ''))
             else:
-                correct_sent.append(b.replace('|', '').replace('-', ''))
+                correct_sent.append(b.replace('|', ''))
                 correct_sent.append('|')
 
         # 判断 a, b 是否为正确单词
         else:
-            if '-' in a: a = a.replace('-', '')
-            if '-' in b: b = b.replace('-', '')
-
+            # 如果是最后一个单词，api正确率较ocr高（观察所得lol）
+            if index == word_count - 1:
+                correct_sent.append(a)
+                break
             # of  books  and --- DVDS  about  maths - I  loved  them
             # ||| |||||| ||||   |      |||||| |||||| ||| |||||| ||||
             # of -books -and pus ------about -maths . I -loved -them
             # 当 b 为 -, a 不为 - 时，做处理
             if b == '' and a != '':
+                word_idx = max(0, word_idx - 1)
                 correct_sent.append(a)
+                continue
 
             if os.name == 'nt':
                 a_check = True if a == '' else all([a != '', a not in LIST_not_in_k12, a in d])
@@ -188,29 +196,26 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
             else:
                 a_check = True if a == '' else all([a != '', a not in LIST_not_in_k12, d.check(a)])
                 b_check = True if b == '' else all([b != '', b not in LIST_not_in_k12, d.check(b)])
-
+            # print 'a_check: {}, b_check: {}'.format(a_check, b_check)
             # print line_data
-            # print word_idx, line_data[word_idx]
-            # 可能有溢出情况发生
+            # print word_idx, b, line_data[word_idx]
             if word_idx < len(line_data):
                 ocr_prob = line_data[word_idx]['weight']
-                
                 if ocr_prob >= 0.95 and line_data[word_idx]['word'] != 'punt':
                     correct_sent.append(b)  # 如果 ocr prob 绝对高，直接过滤所有正确、错误情况
                 elif a_check == b_check:
                     prov_val = 0.9 if any([a.isdigit(), b.isdigit()]) else 0.8
-                    if ocr_prob >= prov_val: correct_sent.append(b)
-                    else: correct_sent.append(a)
+                    if ocr_prob >= prov_val: 
+                        # print 'ocr win:', b
+                        correct_sent.append(b)
+                    else: 
+                        # print 'api win:', a, prov_val, ocr_prob
+                        correct_sent.append(a)
                 elif b_check == True and a_check == False:
                     correct_sent.append(b)
                 elif a_check == True and b_check == False:
                     correct_sent.append(a)
-
-            # print a, a_check, b, b_check, line_data[word_idx]['word'], line_data[word_idx]['weight']
-            
-
-        if word_idx < len(line_data):
-            word_idx += 1
+        word_idx += 1
     
     correct_str = ' '.join(correct_sent).replace('  ', ' ')
     print '**********************************'
@@ -270,11 +275,11 @@ def main():
     # 1. 将所有图像进行 RPC ocr 识别，得到识别结果
     # 将 sample/*.jpg 替换为给你的 Folders ---
 
-    LIST_test = glob.glob(r'./sample/*.jpg')
-    # LIST_test = glob.glob(r'./dataset/small_data/*.jpg')
+    # LIST_test = glob.glob(r'./sample/*.jpg')
+    LIST_test = glob.glob(r'./dataset/small_data/*.jpg')
     LIST_test.sort()
 
-    for idx, FILE_image in enumerate(LIST_test[5:6]):
+    for idx, FILE_image in enumerate(LIST_test[0:]):
         output_text = ''
         print FILE_image, idx+1, '/', len(LIST_test)
         output_text += FILE_image + '\n'
@@ -371,7 +376,7 @@ def main():
             y1_root = line_ocr['bottom']
             line_height = abs(y1_root - y0_root)
             area_seams = [0, y0_root, 100, y1_root]
-            
+
             print '~~~~~~~~~~~~~~'
             output_text += '~~~~~~~~~~~~~~' + '\n'
             print 'Index:','<<<', line_idx, '/', kmeans_category_count,'>>>'
@@ -394,20 +399,18 @@ def main():
                 if any([str_similar >= 0.75, hit_ratio >= 0.5]):
                     print 'API_text:',line_text, '\tsim:',str_similar, 'ratio:',hit_ratio
                     output_text += 'API_text: {} \tsim: {} ratio: {}'.format(line_text, str_similar, hit_ratio) + '\n'
-                    ocr_text = html_clean(line_ocr['text'])
-                    api_text = html_clean(line_text)
+                    # “-”符号在alignment中有特殊含义，先把原文中的此符号转换成^
+                    ocr_text = html_clean(line_ocr['text']).replace('-','^').replace('&', '')
+                    api_text = html_clean(line_text).replace('-','^').replace('&', '')
 
                     alignments = pairwise2.align.globalms(api_text, ocr_text, 2, -1, -2, -0.1)
                     if '' in [api_text.strip(), ocr_text.strip()]: continue
-                    # for item in alignments:
-                    #     print item[0]
-                    #     print item[1]
-                    #     print item[2:]
                     align1, align2, score, begin, end = alignments[-1]
                     lowest_align_score = min(lowest_align_score, score)
 
                     correct_sent, output_text = format_alignment_index(align1, align2, score, begin, end, dict_line[line_idx], output_text)
-
+                    # undo前面的转换
+                    correct_sent = correct_sent.replace('^', '-')
                     text_width, line_height = get_text_size(correct_sent)
                     cv2.rectangle(image_vis, (10, y0 - 10), (10 + text_width, y0 - 10 + line_height), (255, 180, 0), cv2.FILLED)
                     cv2.putText(image_vis, correct_sent, (10, y0 + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
