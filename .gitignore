@@ -3,4 +3,4 @@ dataset/
 *.png
 sample/
 rpc_res/
-.json
+*.json
