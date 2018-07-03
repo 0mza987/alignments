@@ -152,12 +152,15 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
     LIST_punts = ['.', ',', '?', '!']
     correct_sent = list()
     word_idx = 0
-    word_count = len(align1_copy.split('&'))
+    FLAG_deleted = False
+
     for index, (a, b) in enumerate(zip(align1_copy.split('&'), align2_copy.split('&'))):
         # a ---> api word
         # b ---> ocr word
         a = a.replace('-', '')
         b = b.replace('-', '')
+        if b != '' and FLAG_deleted == True: 
+            FLAG_deleted = False
         # print a,b
         if a == b == '': continue
         if a == b:
@@ -168,6 +171,7 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
             word_idx = max(0, word_idx - 1)
             correct_sent.append(a)
         elif '|' in a or '|' in b:
+            FLAG_deleted = True
             if '|' in b[0 : int(0.5 * len(b))]:
                 correct_sent.append('|')
                 correct_sent.append(b.replace('|', ''))
@@ -177,17 +181,21 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
 
         # 判断 a, b 是否为正确单词
         else:
-            # 如果是最后一个单词，api正确率较ocr高（观察所得lol）
-            if index == word_count - 1:
-                correct_sent.append(a)
-                break
+
             # of  books  and --- DVDS  about  maths - I  loved  them
             # ||| |||||| ||||   |      |||||| |||||| ||| |||||| ||||
             # of -books -and pus ------about -maths . I -loved -them
             # 当 b 为 -, a 不为 - 时，做处理
             if b == '' and a != '':
                 word_idx = max(0, word_idx - 1)
-                correct_sent.append(a)
+            # And I think she she gave a speech around the
+            # ||||.|          |||||||||||||. |||||||||||||
+            # And | ----------she gave a spu-ch around the
+            # 当b识别出连续多个删除的单词而a没有识别出，避免将a中的think she加入最终结果
+                if FLAG_deleted:
+                    correct_sent.append(b)
+                else:
+                    correct_sent.append(a)
                 continue
 
             if os.name == 'nt':
@@ -275,8 +283,9 @@ def main():
     # 1. 将所有图像进行 RPC ocr 识别，得到识别结果
     # 将 sample/*.jpg 替换为给你的 Folders ---
 
-    # LIST_test = glob.glob(r'./sample/*.jpg')
-    LIST_test = glob.glob(r'./dataset/small_data/*.jpg')
+    LIST_test = glob.glob(r'./sample/*.jpg')
+    # LIST_test = glob.glob(r'./dataset/small_data/*.jpg')
+    # LIST_test = glob.glob(r'./dataset/badcase_0703/*.jpg')
     LIST_test.sort()
 
     for idx, FILE_image in enumerate(LIST_test[0:]):
@@ -412,16 +421,21 @@ def main():
                     # undo前面的转换
                     correct_sent = correct_sent.replace('^', '-')
                     text_width, line_height = get_text_size(correct_sent)
-                    cv2.rectangle(image_vis, (10, y0 - 10), (10 + text_width, y0 - 10 + line_height), (255, 180, 0), cv2.FILLED)
-                    cv2.putText(image_vis, correct_sent, (10, y0 + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
+                    cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
+                    cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
                     FLAG_found_api_line = True
                     break
-            if FLAG_found_api_line: continue
-            else: print 'Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!'    
-
+            if not FLAG_found_api_line:
+                print 'Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!'  
+                output_text += 'Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!'
+                correct_sent = html_clean(line_ocr['text'])  
+                # cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
+                cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
         # cv2.imwrite('./k-%s.jpg' % os.path.basename(FILE_image), image_vis)
-        cv2.imwrite('./dataset/small_data_res_0625_init/{:.2f}_k_{}.jpg'.format(lowest_align_score, os.path.basename(FILE_image)), image_vis)
-        with open('./dataset/small_data_res_0625_init/{:.2f}_k_{}.txt'.format(lowest_align_score, os.path.basename(FILE_image)), 'w') as f:
+        dname = 'badcase_0703_res'
+        dname = 'small_data_res_0703'
+        cv2.imwrite('./dataset/{}/{:.2f}_k_{}.jpg'.format(dname,lowest_align_score, os.path.basename(FILE_image)), image_vis)
+        with open('./dataset/{}/{:.2f}_k_{}.txt'.format(dname, lowest_align_score, os.path.basename(FILE_image)), 'w') as f:
             f.write(output_text)
 if __name__ == '__main__':
     main()
