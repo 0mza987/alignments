@@ -94,7 +94,8 @@ def IoU(Reframe, GTframe):
         Area = width*height # 两矩形相交面积
         Area1 = width1*height1
         Area2 = width2*height2
-        ratio = Area*1./(Area1+Area2-Area)
+        # ratio = Area*1./(Area1+Area2-Area)
+        ratio = Area * 1.0 / min(Area1, Area2)
     # return IOU
 
     # 更新判断指标，矩形的长、宽应该接近和类似
@@ -152,16 +153,31 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
     LIST_punts = ['.', ',', '?', '!']
     correct_sent = list()
     word_idx = 0
+    # last_a = None
+    last_b = None
     FLAG_deleted = False
 
     for index, (a, b) in enumerate(zip(align1_copy.split('&'), align2_copy.split('&'))):
+        # ============================================
+        # 1. Pre process
+        # ============================================
+
         # a ---> api word
         # b ---> ocr word
         a = a.replace('-', '')
         b = b.replace('-', '')
+        # print word_idx, b, line_data[word_idx]
+        # 处理ocr word被align分成两个词的情况
+        if last_b != None and last_b !='' and word_idx<len(line_data) and line_data[word_idx]['word']!='punt' and line_data[word_idx-1]['word']==last_b + b:
+            word_idx = max(0, word_idx - 1)
+
+        # 前面出现过删除符号，这里置回False
         if b != '' and FLAG_deleted == True: 
             FLAG_deleted = False
-        # print a,b
+
+        # ============================================
+        # 2. 开始配对
+        # ============================================
         if a == b == '': continue
         if a == b:
             correct_sent.append(a)
@@ -181,6 +197,13 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
 
         # 判断 a, b 是否为正确单词
         else:
+            # 对a,b分别进行拼写检测
+            if os.name == 'nt':
+                a_check = True if a == '' else all([a != '', a not in LIST_not_in_k12, a in d])
+                b_check = True if b == '' else all([b != '', b not in LIST_not_in_k12, b in d])
+            else:
+                a_check = True if a == '' else all([a != '', a not in LIST_not_in_k12, d.check(a)])
+                b_check = True if b == '' else all([b != '', b not in LIST_not_in_k12, d.check(b)])
 
             # of  books  and --- DVDS  about  maths - I  loved  them
             # ||| |||||| ||||   |      |||||| |||||| ||| |||||| ||||
@@ -191,23 +214,19 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
             # And I think she she gave a speech around the
             # ||||.|          |||||||||||||. |||||||||||||
             # And | ----------she gave a spu-ch around the
+
             # 当b识别出连续多个删除的单词而a没有识别出，避免将a中的think she加入最终结果
-                if FLAG_deleted:
+            # 同时避免a识别出了多余的乱码，若不是单词则依然取b的结果
+                if FLAG_deleted or a_check==False:
                     correct_sent.append(b)
                 else:
                     correct_sent.append(a)
                 continue
-
-            if os.name == 'nt':
-                a_check = True if a == '' else all([a != '', a not in LIST_not_in_k12, a in d])
-                b_check = True if b == '' else all([b != '', b not in LIST_not_in_k12, b in d])
-            else:
-                a_check = True if a == '' else all([a != '', a not in LIST_not_in_k12, d.check(a)])
-                b_check = True if b == '' else all([b != '', b not in LIST_not_in_k12, d.check(b)])
+            elif b != '' and a =='':
+                correct_sent.append(b)
             # print 'a_check: {}, b_check: {}'.format(a_check, b_check)
-            # print line_data
-            # print word_idx, b, line_data[word_idx]
-            if word_idx < len(line_data):
+            # print word_idx, '/', len(line_data), b, line_data[word_idx]
+            elif word_idx < len(line_data):
                 ocr_prob = line_data[word_idx]['weight']
                 if ocr_prob >= 0.95 and line_data[word_idx]['word'] != 'punt':
                     correct_sent.append(b)  # 如果 ocr prob 绝对高，直接过滤所有正确、错误情况
@@ -223,6 +242,10 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
                     correct_sent.append(b)
                 elif a_check == True and b_check == False:
                     correct_sent.append(a)
+            else:
+                correct_sent.append(b)
+        # last_a = a
+        last_b = b
         word_idx += 1
     
     correct_str = ' '.join(correct_sent).replace('  ', ' ')
@@ -283,9 +306,9 @@ def main():
     # 1. 将所有图像进行 RPC ocr 识别，得到识别结果
     # 将 sample/*.jpg 替换为给你的 Folders ---
 
-    LIST_test = glob.glob(r'./sample/*.jpg')
+    # LIST_test = glob.glob(r'./sample/*.jpg')
     # LIST_test = glob.glob(r'./dataset/small_data/*.jpg')
-    # LIST_test = glob.glob(r'./dataset/badcase_0703/*.jpg')
+    LIST_test = glob.glob(r'./dataset/badcase_0703/*.jpg')
     LIST_test.sort()
 
     for idx, FILE_image in enumerate(LIST_test[0:]):
@@ -405,7 +428,7 @@ def main():
                 area_api = [0, y0, 100, y1]
                 hit_ratio, _ = IoU(area_seams, area_api)
                 height_diff = abs(abs(y1_root - y0_root) - abs(y1 - y0))
-                if any([str_similar >= 0.75, hit_ratio >= 0.5]):
+                if all([str_similar >= 0.75, hit_ratio >= 0.5]):
                     print 'API_text:',line_text, '\tsim:',str_similar, 'ratio:',hit_ratio
                     output_text += 'API_text: {} \tsim: {} ratio: {}'.format(line_text, str_similar, hit_ratio) + '\n'
                     # “-”符号在alignment中有特殊含义，先把原文中的此符号转换成^
@@ -433,7 +456,7 @@ def main():
                 cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
         # cv2.imwrite('./k-%s.jpg' % os.path.basename(FILE_image), image_vis)
         dname = 'badcase_0703_res'
-        dname = 'small_data_res_0703'
+        # dname = 'small_data_res_0703'
         cv2.imwrite('./dataset/{}/{:.2f}_k_{}.jpg'.format(dname,lowest_align_score, os.path.basename(FILE_image)), image_vis)
         with open('./dataset/{}/{:.2f}_k_{}.txt'.format(dname, lowest_align_score, os.path.basename(FILE_image)), 'w') as f:
             f.write(output_text)
