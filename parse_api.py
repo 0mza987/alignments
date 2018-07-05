@@ -452,7 +452,8 @@ def main():
                 print 'Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!'  
                 output_text += 'Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!'
                 correct_sent = html_clean(line_ocr['text'])  
-                # cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
+                text_width, line_height = get_text_size(correct_sent)
+                cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
                 cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
         # cv2.imwrite('./k-%s.jpg' % os.path.basename(FILE_image), image_vis)
         dname = 'badcase_0703_res'
