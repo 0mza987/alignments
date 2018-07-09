@@ -105,7 +105,7 @@ def IoU(Reframe, GTframe):
 
 
 
-def format_alignment_index(align1, align2, score, begin, end, line_data, output_text):
+def format_alignment_index(align1, align2, score, begin, end, line_data):
     """ use Bio.pairwise2.format_alignment as reference
         http://biopython.org/DIST/docs/api/Bio.pairwise2-pysrc.html#format_alignment
     """
@@ -249,12 +249,12 @@ def format_alignment_index(align1, align2, score, begin, end, line_data, output_
         word_idx += 1
     
     correct_str = ' '.join(correct_sent).replace('  ', ' ')
-    output_text = print_and_save(output_text, '**********************************')
-    output_text = print_and_save(output_text, '{}\t\tAlign score: {}'.format(correct_str, score))
-    output_text = print_and_save(output_text, '**********************************')
-    output_text = print_and_save(output_text, ''.join(s))
-    output_text = print_and_save(output_text, '**********************************')
-    return correct_str, output_text
+    print_and_save('**********************************')
+    print_and_save('{}\t\tAlign score: {}'.format(correct_str, score))
+    print_and_save('**********************************')
+    print_and_save(''.join(s))
+    print_and_save('**********************************')
+    return correct_str
 
 
 def show_result_on_image(result, image):
@@ -292,11 +292,11 @@ def show_result_on_image(result, image):
 
     return image, LIST_word_ims
     
-def print_and_save(output_text, text):
-    # output_text is a global value
+def print_and_save(text):
     print text
+    global output_text
     output_text += text + '\n'
-    return output_text
+    # return output_text
     
 
 def main():
@@ -312,8 +312,9 @@ def main():
     LIST_test.sort()
 
     for idx, FILE_image in enumerate(LIST_test[0:1]):
+        global output_text
         output_text = ''
-        output_text = print_and_save(output_text, '{} {} / {}'.format(FILE_image, idx+1, len(LIST_test)))
+        print_and_save('{} {} / {}'.format(FILE_image, idx+1, len(LIST_test)))
         image_vis = cv2.imread(FILE_image)
         image     = cv2.imread(FILE_image, 0)
 
@@ -326,12 +327,13 @@ def main():
         if os.path.exists(FILE_rpc_ocr) == False:
             LIST_data = {'fname': os.path.basename(FILE_image), 'img_str': _img_to_str_base64(image)}
             rpc_ocr_res = c_en_predict.predict_essay(LIST_data, True, [])
-            with open(FILE_rpc_ocr, 'w') as o: print >> o, json.dumps(rpc_ocr_res)
+            rpc_ocr_res['data'] = json.loads(rpc_ocr_res['data'])
+            json.dump(rpc_ocr_res, open(FILE_rpc_ocr, 'w'))
 
         # -------------------------------------
         # load 2 OCR result
         # -------------------------------------
-        output_text = print_and_save(output_text, FILE_rpc_ocr)
+        print_and_save(FILE_rpc_ocr)
         DATA_rpc_json = json.load(open(FILE_rpc_ocr))                          # rpc.ocr.json
         DATA_new_api_json = json.load(open(FILE_new_api_ocr))                      # ocr.json
 
@@ -340,7 +342,7 @@ def main():
         # -------------------------------------
         # 考虑到标点符号占位问题，将标点作为一个 dict_line 对象加入进去
         dict_line = dict()
-        rpc_ocr_result = json.loads(DATA_rpc_json['data'])['blocks'][0]
+        rpc_ocr_result = DATA_rpc_json['data']['blocks'][0]
         for inst in rpc_ocr_result['words']['words']:
             line_idx = inst['line']
             if dict_line.has_key(line_idx) == False: dict_line[line_idx] = list()
@@ -360,7 +362,7 @@ def main():
         # Think: 可否用 kmeans 聚类方式来搞？
         rpc_ocr_result['lines'] = [line for line in rpc_ocr_result['lines'] if len(line['text'].strip()) > 0]
         rpc_ocr_lines = len(rpc_ocr_result['lines'])
-        output_text = print_and_save(output_text, 'rpc api get {} lines'.format(rpc_ocr_lines))
+        print_and_save('rpc api get {} lines'.format(rpc_ocr_lines))
 
         LIST_line_feature = list()
         for line_idx, line_ocr in enumerate(rpc_ocr_result['lines']):       # 不考虑 API 识别结果
@@ -369,7 +371,7 @@ def main():
             # LIST_line_feature.append((y0_root, y1_root, y1_root - y0_root))
 
         new_api_line_count = len(DATA_new_api_json['recognitionResult']['lines'])
-        output_text = print_and_save(output_text, 'new api get {} lines'.format(new_api_line_count))
+        print_and_save('new api get {} lines'.format(new_api_line_count))
         for idx, line_api in enumerate(DATA_new_api_json['recognitionResult']['lines']):
             y0 = min(line_api['boundingBox'][1], line_api['boundingBox'][3], line_api['boundingBox'][5], line_api['boundingBox'][7])
             y1 = max(line_api['boundingBox'][1], line_api['boundingBox'][3], line_api['boundingBox'][5], line_api['boundingBox'][7])
@@ -379,9 +381,9 @@ def main():
         from sklearn.cluster import KMeans
         X = np.array(list(LIST_line_feature))
         kmeans = KMeans(n_clusters=min(rpc_ocr_lines, new_api_line_count), random_state=0).fit(X)
-        output_text = print_and_save(output_text, str(sorted(kmeans.labels_)))
+        print_and_save(str(sorted(kmeans.labels_)))
         kmeans_category_count = len(set(kmeans.labels_))
-        output_text = print_and_save(output_text, 'Kmeans labels category count: {}'.format(kmeans_category_count))
+        print_and_save('Kmeans labels category count: {}'.format(kmeans_category_count))
         # 将 cluster label 进行聚类
         LIST_lines = list()
         for k in range(0, kmeans_category_count):
@@ -390,7 +392,7 @@ def main():
             y0 = min([min(i) for i in clutser_y])
             y1 = max([max(i) for i in clutser_y])
             clean_text = html_clean(' '.join([i['text'] for i in cluster_lines])), y0, y1
-            output_text = print_and_save(output_text, '{}: {}'.format(k,clean_text))
+            print_and_save('{}: {}'.format(k,clean_text))
             LIST_lines.append((y0, y1, cluster_lines))
 
         lowest_align_score = 10000
@@ -402,10 +404,10 @@ def main():
             line_height = abs(y1_root - y0_root)
             area_seams = [0, y0_root, 100, y1_root]
             
-            output_text = print_and_save(output_text, '~~~~~~~~~~~~~~')
-            output_text = print_and_save(output_text, 'Index: <<< {} / {} >>>'.format(line_idx, kmeans_category_count))
-            output_text = print_and_save(output_text, '-' * 50)
-            output_text = print_and_save(output_text, 'OCR_text: {}'.format(line_ocr['text']))
+            print_and_save('~~~~~~~~~~~~~~')
+            print_and_save('Index: <<< {} / {} >>>'.format(line_idx, kmeans_category_count))
+            print_and_save('-' * 50)
+            print_and_save('OCR_text: {}'.format(line_ocr['text']))
             
 
             FLAG_found_api_line = False
@@ -419,7 +421,7 @@ def main():
                 hit_ratio, _ = IoU(area_seams, area_api)
                 height_diff = abs(abs(y1_root - y0_root) - abs(y1 - y0))
                 if all([str_similar >= 0.75, hit_ratio >= 0.5]):
-                    output_text = print_and_save(output_text, 'API_text: {} \tsim: {} ratio: {}'.format(line_text, str_similar, hit_ratio))
+                    print_and_save('API_text: {} \tsim: {} ratio: {}'.format(line_text, str_similar, hit_ratio))
                     # “-”符号在alignment中有特殊含义，先把原文中的此符号转换成^
                     ocr_text = html_clean(line_ocr['text']).replace('-','^').replace('&', '')
                     api_text = html_clean(line_text).replace('-','^').replace('&', '')
@@ -429,7 +431,7 @@ def main():
                     align1, align2, score, begin, end = alignments[-1]
                     lowest_align_score = min(lowest_align_score, score)
 
-                    correct_sent, output_text = format_alignment_index(align1, align2, score, begin, end, dict_line[line_idx], output_text)
+                    correct_sent = format_alignment_index(align1, align2, score, begin, end, dict_line[line_idx])
                     # undo前面的转换
                     correct_sent = correct_sent.replace('^', '-')
                     text_width, line_height = get_text_size(correct_sent)
@@ -438,7 +440,7 @@ def main():
                     FLAG_found_api_line = True
                     break
             if not FLAG_found_api_line:
-                output_text = print_and_save(output_text, 'Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!')
+                print_and_save('Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!')
                 correct_sent = html_clean(line_ocr['text'])  
                 text_width, line_height = get_text_size(correct_sent)
                 cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
