@@ -2,10 +2,11 @@
 # -------------------------------------
 # ocr text alignment
 # -------------------------------------
-
-import os, json, cv2, re, jellyfish
+import os, json, cv2, re, time
+import jellyfish
 import zerorpc, base64, glob, itertools
 import numpy as np
+from multiprocessing import Pool
 
 if os.name == 'nt':
     d = [k.strip() for k in open('dict/american-english', 'r').readlines()]
@@ -298,13 +299,16 @@ def show_result_on_image(result, image):
     return image, LIST_word_ims
     
 def print_and_save(text):
-    print text
-    global output_text
-    output_text += text + '\n'
+    pass
+    # print text
+    # global output_text
+    # output_text += text + '\n'
     # return output_text
     
     
-def main():
+def parse_single(eid):
+    
+    TIME_s = time.time()
     c_en_predict = zerorpc.Client(heartbeat=None, timeout=20)
     c_en_predict.connect('tcp://192.168.1.115:12001')  # en 12001, cn 11001
 
@@ -312,20 +316,24 @@ def main():
     # 将 sample/*.jpg 替换为给你的 Folders ---
 
     # LIST_test = glob.glob(r'./sample/*.jpg')
-    LIST_test = glob.glob(r'./dataset/small_data/*.jpg')
+    # LIST_test = glob.glob(r'./dataset/small_data/*.jpg')
     # LIST_test = glob.glob(r'./dataset/badcase_0703/*.jpg')
-    LIST_test.sort()
-
-    ratio_95 = 0
-    ratio_90 = 0
-    ratio_85 = 0
-    ratio_80 = 0
-    nb_lines = 0
+    print 'Grabbing image files, please wait...'
+    LIST_test = glob.glob(r'/home/ubuntu/Desktop/server_data/output_essay/{}/*.jpg'.format(eid))
+    # LIST_test.sort()
+    print 'Exercise id: {}, Total image: {}.'.format(eid, len(LIST_test))
+    
+    ratio_95 = ratio_90 = ratio_85 = ratio_80 = nb_lines = 0
 
     for idx, FILE_image in enumerate(LIST_test[0:]):
+        # get file info
+        image_name = os.path.basename(FILE_image)
+        exercise_id = image_name[0:10]
+        pic_id = image_name[11:-4]
+
         global output_text
         output_text = ''
-        print_and_save('{} {} / {}'.format(FILE_image, idx+1, len(LIST_test)))
+        print_and_save('Now processing: {} {} / {}'.format(image_name, idx+1, len(LIST_test)))
         image_vis = cv2.imread(FILE_image)
         image     = cv2.imread(FILE_image, 0)
 
@@ -333,7 +341,9 @@ def main():
         # OCR RPC result
         # -------------------------------------
         # 本地 RPC ocr result 地址
-        FILE_rpc_ocr = 'rpc_res/' + os.path.basename(FILE_image) + '.rpc.res.json'
+        rpc_dir = './rpc_res/{}'.format(exercise_id)
+        if not os.path.exists(rpc_dir): os.makedirs(rpc_dir)
+        FILE_rpc_ocr = os.path.join(rpc_dir, os.path.basename(FILE_image) + '.rpc.res.json')
         FILE_new_api_ocr = FILE_image + '.ocr.json'
         if os.path.exists(FILE_rpc_ocr) == False:
             LIST_data = {'fname': os.path.basename(FILE_image), 'img_str': _img_to_str_base64(image)}
@@ -406,7 +416,6 @@ def main():
             print_and_save('{}: {}'.format(k,clean_text))
             LIST_lines.append((y0, y1, cluster_lines))
 
-        avg_normal_score = 0
         for line_idx, line_ocr in enumerate(rpc_ocr_result['lines']):
             nb_lines += 1
             line_idx += 1 # 代表 line，从 1 开始
@@ -455,32 +464,64 @@ def main():
                 cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
                 cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
             
-            if normal_score > 0.95:
-                ratio_95 += 1
-            if normal_score > 0.9:
-                ratio_90 += 1
-            if normal_score > 0.85:
-                ratio_85 += 1
-            if normal_score > 0.8:
-                ratio_80 += 1
-            avg_normal_score += normal_score
-        avg_normal_score /= len(rpc_ocr_result['lines'])
-        
-        dname = 'badcase_0703_res'
-        dname = 'small_data_res'
-        cv2.imwrite('./dataset/{}/{:.4f}_k_{}.jpg'.format(dname,avg_normal_score, os.path.basename(FILE_image)), image_vis)
-        with open('./dataset/{}/{:.4f}_k_{}.txt'.format(dname, avg_normal_score, os.path.basename(FILE_image)), 'w') as f:
-            f.write(output_text)
+            # count normal score 
+            if normal_score > 0.95: ratio_95 += 1
+            if normal_score > 0.90: ratio_90 += 1
+            if normal_score > 0.85: ratio_85 += 1
+            if normal_score > 0.80: ratio_80 += 1
+
+            # save line picture and aligned text
+            line_image = image[y0_root:y1_root,:]
+            fpath = './dataset/server_data_res/{}'.format(exercise_id)
+            if not os.path.exists(fpath): os.makedirs(fpath)
+            fname = '{}_{}_line_{}_{:.4f}.jpg'.format(exercise_id, pic_id, str(line_idx).zfill(2), normal_score)
+            cv2.imwrite(os.path.join(fpath, fname) , line_image)
+            with open(os.path.join(fpath, fname[0:-4]+'.txt'), 'w') as f:
+                f.write(correct_sent) 
+
+    print '@@@@@@@@@@ Finished {} with total lines: {}. Cost {} s. @@@@@@@@@@'.format(eid, nb_lines, time.time()-TIME_s)
+
+    return (ratio_95, ratio_90, ratio_85, ratio_80, nb_lines)
+
+
+def mp_parse():
+    # Multiprocessing to parse the data
+    LIST_eid_dir = glob.glob(r'/home/ubuntu/Desktop/server_data/output_essay/*')
+    LIST_eid = [os.path.basename(item) for item in LIST_eid_dir]
+    LIST_eid.sort()
+    LIST_eid = LIST_eid[0:]
+    print '{} exercise are going to be processed.'.format(len(LIST_eid))
+
+    p = Pool(1)
+    LIST_ret = p.map(parse_single, LIST_eid)
+    p.close()
+    p.join()
+
+    # aftermath of the data
+    ratio_95 = ratio_90 = ratio_85 = ratio_80 = nb_lines = 0
+
+    for item in LIST_ret:
+        ratio_95 += item[0]
+        ratio_90 += item[1]
+        ratio_85 += item[2]
+        ratio_80 += item[3]
+        nb_lines += item[4]
 
     ratio_95 /= (1.0 * nb_lines)
     ratio_90 /= (1.0 * nb_lines)
     ratio_85 /= (1.0 * nb_lines)
     ratio_80 /= (1.0 * nb_lines)
-    print ratio_95
-    print ratio_90
-    print ratio_85
-    print ratio_80
+
+    print 'Above 0.95:', ratio_95
+    print 'Above 0.90:', ratio_90
+    print 'Above 0.85:', ratio_85
+    print 'Above 0.80:', ratio_80
     print 'total lines: {}'.format(nb_lines)
+
+
+def aftermath():
+    pass
+
 if __name__ == '__main__':
     output_text = ''
-    main()
+    mp_parse()
