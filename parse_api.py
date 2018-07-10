@@ -247,14 +247,19 @@ def format_alignment_index(align1, align2, score, begin, end, line_data):
         # last_a = a
         last_b = b
         word_idx += 1
-    
+
     correct_str = ' '.join(correct_sent).replace('  ', ' ')
+    real_length = len(correct_str)
+    if len(correct_str) > 2 and correct_str[-2]==' ' and correct_str[-1] in [',','.','?','!',':',';']:
+        real_length -= 2
+    normal_score = min(1, score/real_length/2)
+
     print_and_save('**********************************')
-    print_and_save('{}\t\tAlign score: {}'.format(correct_str, score))
+    print_and_save('{}\t\tAlign score: {}\tNormal score: {:.4f}'.format(correct_str, score, normal_score))
     print_and_save('**********************************')
     print_and_save(''.join(s))
     print_and_save('**********************************')
-    return correct_str
+    return correct_str, normal_score
 
 
 def show_result_on_image(result, image):
@@ -311,7 +316,13 @@ def main():
     # LIST_test = glob.glob(r'./dataset/badcase_0703/*.jpg')
     LIST_test.sort()
 
-    for idx, FILE_image in enumerate(LIST_test[0:1]):
+    ratio_95 = 0
+    ratio_90 = 0
+    ratio_85 = 0
+    ratio_80 = 0
+    nb_lines = 0
+
+    for idx, FILE_image in enumerate(LIST_test[0:]):
         global output_text
         output_text = ''
         print_and_save('{} {} / {}'.format(FILE_image, idx+1, len(LIST_test)))
@@ -395,9 +406,9 @@ def main():
             print_and_save('{}: {}'.format(k,clean_text))
             LIST_lines.append((y0, y1, cluster_lines))
 
-        lowest_align_score = 10000
-
+        avg_normal_score = 0
         for line_idx, line_ocr in enumerate(rpc_ocr_result['lines']):
+            nb_lines += 1
             line_idx += 1 # 代表 line，从 1 开始
             y0_root = line_ocr['top']
             y1_root = line_ocr['bottom']
@@ -409,9 +420,8 @@ def main():
             print_and_save('-' * 50)
             print_and_save('OCR_text: {}'.format(line_ocr['text']))
             
-
             FLAG_found_api_line = False
-            LIST_line = list()
+            normal_score = 1
             for idx, inst in enumerate(LIST_lines):
                 y0, y1, line_api = inst
 
@@ -420,18 +430,17 @@ def main():
                 area_api = [0, y0, 100, y1]
                 hit_ratio, _ = IoU(area_seams, area_api)
                 height_diff = abs(abs(y1_root - y0_root) - abs(y1 - y0))
-                if all([str_similar >= 0.75, hit_ratio >= 0.5]):
+                if all([str_similar >= 0.7, hit_ratio >= 0.5]):
                     print_and_save('API_text: {} \tsim: {} ratio: {}'.format(line_text, str_similar, hit_ratio))
                     # “-”符号在alignment中有特殊含义，先把原文中的此符号转换成^
                     ocr_text = html_clean(line_ocr['text']).replace('-','^').replace('&', '')
                     api_text = html_clean(line_text).replace('-','^').replace('&', '')
 
-                    alignments = pairwise2.align.globalms(api_text, ocr_text, 2, -1, -2, -0.1)
+                    alignments = pairwise2.align.globalmx(api_text, ocr_text, 2, -3)
                     if '' in [api_text.strip(), ocr_text.strip()]: continue
                     align1, align2, score, begin, end = alignments[-1]
-                    lowest_align_score = min(lowest_align_score, score)
 
-                    correct_sent = format_alignment_index(align1, align2, score, begin, end, dict_line[line_idx])
+                    correct_sent, normal_score = format_alignment_index(align1, align2, score, begin, end, dict_line[line_idx])
                     # undo前面的转换
                     correct_sent = correct_sent.replace('^', '-')
                     text_width, line_height = get_text_size(correct_sent)
@@ -445,13 +454,33 @@ def main():
                 text_width, line_height = get_text_size(correct_sent)
                 cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
                 cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
-        # cv2.imwrite('./k-%s.jpg' % os.path.basename(FILE_image), image_vis)
+            
+            if normal_score > 0.95:
+                ratio_95 += 1
+            if normal_score > 0.9:
+                ratio_90 += 1
+            if normal_score > 0.85:
+                ratio_85 += 1
+            if normal_score > 0.8:
+                ratio_80 += 1
+            avg_normal_score += normal_score
+        avg_normal_score /= len(rpc_ocr_result['lines'])
+        
         dname = 'badcase_0703_res'
-        # dname = 'small_data_res'
-        cv2.imwrite('./dataset/{}/{:.2f}_k_{}.jpg'.format(dname,lowest_align_score, os.path.basename(FILE_image)), image_vis)
-        with open('./dataset/{}/{:.2f}_k_{}.txt'.format(dname, lowest_align_score, os.path.basename(FILE_image)), 'w') as f:
+        dname = 'small_data_res'
+        cv2.imwrite('./dataset/{}/{:.4f}_k_{}.jpg'.format(dname,avg_normal_score, os.path.basename(FILE_image)), image_vis)
+        with open('./dataset/{}/{:.4f}_k_{}.txt'.format(dname, avg_normal_score, os.path.basename(FILE_image)), 'w') as f:
             f.write(output_text)
 
+    ratio_95 /= (1.0 * nb_lines)
+    ratio_90 /= (1.0 * nb_lines)
+    ratio_85 /= (1.0 * nb_lines)
+    ratio_80 /= (1.0 * nb_lines)
+    print ratio_95
+    print ratio_90
+    print ratio_85
+    print ratio_80
+    print 'total lines: {}'.format(nb_lines)
 if __name__ == '__main__':
     output_text = ''
     main()
