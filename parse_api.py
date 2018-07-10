@@ -421,7 +421,7 @@ def main():
             print_and_save('OCR_text: {}'.format(line_ocr['text']))
             
             FLAG_found_api_line = False
-            normal_score = 1
+            normal_score = 1.0
             for idx, inst in enumerate(LIST_lines):
                 y0, y1, line_api = inst
 
