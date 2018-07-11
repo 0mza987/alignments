@@ -336,7 +336,7 @@ def parse_single(eid):
         print_and_save('Now processing: {} {} / {}'.format(image_name, idx+1, len(LIST_test)))
         image_vis = cv2.imread(FILE_image)
         image     = cv2.imread(FILE_image, 0)
-
+        align_res = []
         # -------------------------------------
         # OCR RPC result
         # -------------------------------------
@@ -470,14 +470,25 @@ def parse_single(eid):
             if normal_score > 0.85: ratio_85 += 1
             if normal_score > 0.80: ratio_80 += 1
 
-            # save line picture and aligned text
-            line_image = image[y0_root:y1_root,:]
-            fpath = './dataset/server_data_res/{}'.format(exercise_id)
-            if not os.path.exists(fpath): os.makedirs(fpath)
-            fname = '{}_{}_line_{}_{:.4f}.jpg'.format(exercise_id, pic_id, str(line_idx).zfill(2), normal_score)
-            cv2.imwrite(os.path.join(fpath, fname) , line_image)
-            with open(os.path.join(fpath, fname[0:-4]+'.txt'), 'w') as f:
-                f.write(correct_sent) 
+            # if aligned string is '|' only (image is likely to be a blank image), skip
+            if correct_sent=='|':  continue
+
+            # append the line result to image result
+            line_res = {
+                'line_idx': line_idx,
+                'text': correct_sent,
+                'align_score': normal_score,
+                'filename': line_ocr['filename'],
+                'top': line_ocr['top'],
+                'bottom': line_ocr['bottom']
+            }
+            align_res.append(line_res)
+
+        # save essay align result
+        fpath = './dataset/server_data_res/{}'.format(exercise_id)
+        if not os.path.exists(fpath): os.makedirs(fpath)
+        fname = '{}_{}.json'.format(exercise_id, pic_id)
+        json.dump(align_res, open(os.path.join(fpath,fname), 'w'))
 
     print '@@@@@@@@@@ Finished {} with total lines: {}. Cost {} s. @@@@@@@@@@'.format(eid, nb_lines, time.time()-TIME_s)
 
@@ -490,7 +501,7 @@ def mp_parse():
     LIST_eid = [os.path.basename(item) for item in LIST_eid_dir]
     LIST_eid.sort()
     LIST_eid = LIST_eid[0:]
-    print '{} exercise are going to be processed.'.format(len(LIST_eid))
+    print '{} exercises are going to be processed.'.format(len(LIST_eid))
 
     p = Pool(1)
     LIST_ret = p.map(parse_single, LIST_eid)
