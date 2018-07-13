@@ -318,7 +318,6 @@ def parse_single(eid):
     # LIST_test = glob.glob(r'./sample/*.jpg')
     # LIST_test = glob.glob(r'./dataset/small_data/*.jpg')
     # LIST_test = glob.glob(r'./dataset/badcase_0703/*.jpg')
-    print 'Grabbing image files, please wait...'
     LIST_test = glob.glob(r'/home/ubuntu/Desktop/server_data/output_essay/{}/*.jpg'.format(eid))
     # LIST_test.sort()
     print 'Exercise id: {}, Total image: {}.'.format(eid, len(LIST_test))
@@ -345,11 +344,13 @@ def parse_single(eid):
         if not os.path.exists(rpc_dir): os.makedirs(rpc_dir)
         FILE_rpc_ocr = os.path.join(rpc_dir, os.path.basename(FILE_image) + '.rpc.res.json')
         FILE_new_api_ocr = FILE_image + '.ocr.json'
-        if os.path.exists(FILE_rpc_ocr) == False:
-            LIST_data = {'fname': os.path.basename(FILE_image), 'img_str': _img_to_str_base64(image)}
-            rpc_ocr_res = c_en_predict.predict_essay(LIST_data, True, [])
-            rpc_ocr_res['data'] = json.loads(rpc_ocr_res['data'])
-            json.dump(rpc_ocr_res, open(FILE_rpc_ocr, 'w'))
+        try:
+            if os.path.exists(FILE_rpc_ocr) == False:
+                LIST_data = {'fname': os.path.basename(FILE_image), 'img_str': _img_to_str_base64(image)}
+                rpc_ocr_res = c_en_predict.predict_essay(LIST_data, True, [])
+                rpc_ocr_res['data'] = json.loads(rpc_ocr_res['data'])
+                json.dump(rpc_ocr_res, open(FILE_rpc_ocr, 'w'))
+        except: continue
 
         # -------------------------------------
         # load 2 OCR result
@@ -392,6 +393,7 @@ def parse_single(eid):
             # LIST_line_feature.append((y0_root, y1_root, y1_root - y0_root))
 
         new_api_line_count = len(DATA_new_api_json['recognitionResult']['lines'])
+        if new_api_line_count == 0: continue    # 若为空，跳过
         print_and_save('new api get {} lines'.format(new_api_line_count))
         for idx, line_api in enumerate(DATA_new_api_json['recognitionResult']['lines']):
             y0 = min(line_api['boundingBox'][1], line_api['boundingBox'][3], line_api['boundingBox'][5], line_api['boundingBox'][7])
@@ -470,8 +472,10 @@ def parse_single(eid):
             if normal_score > 0.85: ratio_85 += 1
             if normal_score > 0.80: ratio_80 += 1
 
-            # if aligned string is '|' only (image is likely to be a blank image), skip
-            if correct_sent=='|':  continue
+            # if aligned string is '|' only (image is likely to be a blank image)
+            if correct_sent=='|':
+                correct_sent = ''
+                normal_score = 1
 
             # append the line result to image result
             line_res = {
@@ -492,7 +496,7 @@ def parse_single(eid):
 
     print '@@@@@@@@@@ Finished {} with total lines: {}. Cost {} s. @@@@@@@@@@'.format(eid, nb_lines, time.time()-TIME_s)
 
-    return (ratio_95, ratio_90, ratio_85, ratio_80, nb_lines)
+    return [ratio_95, ratio_90, ratio_85, ratio_80, nb_lines]
 
 
 def mp_parse():
@@ -503,10 +507,18 @@ def mp_parse():
     LIST_eid = LIST_eid[0:]
     print '{} exercises are going to be processed.'.format(len(LIST_eid))
 
-    p = Pool(1)
-    LIST_ret = p.map(parse_single, LIST_eid)
-    p.close()
-    p.join()
+    ## Multiprocessing
+    # p = Pool(1)
+    # LIST_ret = p.map(parse_single, LIST_eid)
+    # p.close()
+    # p.join()
+
+    # single process
+    LIST_ret=[]
+    break_pt = 70
+    for idx, eid in enumerate(LIST_eid[break_pt:]):
+        print 'Index: {} / {}'.format(idx+1+break_pt, len(LIST_eid))
+        LIST_ret.append(parse_single(eid))
 
     # aftermath of the data
     ratio_95 = ratio_90 = ratio_85 = ratio_80 = nb_lines = 0
