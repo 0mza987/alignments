@@ -2,7 +2,7 @@
 # -------------------------------------
 # ocr text alignment
 # -------------------------------------
-import os, json, cv2, re, time
+import os, json, cv2, re, time, signal
 import jellyfish
 import zerorpc, base64, glob, itertools
 import numpy as np
@@ -305,6 +305,11 @@ def print_and_save(text):
     # output_text += text + '\n'
     # return output_text
     
+class TimeoutException(Exception):
+    pass
+
+def timeout(signum, frame):
+    raise TimeoutException('Process time too long, skip.')
     
 def parse_single(eid):
     
@@ -329,7 +334,7 @@ def parse_single(eid):
         image_name = os.path.basename(FILE_image)
         exercise_id = image_name[0:10]
         pic_id = image_name[11:-4]
-
+        print pic_id
         global output_text
         output_text = ''
         print_and_save('Now processing: {} {} / {}'.format(image_name, idx+1, len(LIST_test)))
@@ -446,8 +451,15 @@ def parse_single(eid):
                     # “-”符号在alignment中有特殊含义，先把原文中的此符号转换成^
                     ocr_text = html_clean(line_ocr['text']).replace('-','^').replace('&', '')
                     api_text = html_clean(line_text).replace('-','^').replace('&', '')
+                    #SIGALRM is only usable on a unix platform
+                    signal.signal(signal.SIGALRM, timeout)
+                    #change 5 to however many seconds you need
+                    signal.alarm(5)
+                    try:
+                        alignments = pairwise2.align.globalmx(api_text, ocr_text, 2, -3)
+                    except TimeoutException: continue
 
-                    alignments = pairwise2.align.globalmx(api_text, ocr_text, 2, -3)
+                    # alignments = pairwise2.align.globalmx(api_text, ocr_text, 2, -3)
                     if '' in [api_text.strip(), ocr_text.strip()]: continue
                     align1, align2, score, begin, end = alignments[-1]
 
@@ -471,7 +483,7 @@ def parse_single(eid):
             if normal_score > 0.90: ratio_90 += 1
             if normal_score > 0.85: ratio_85 += 1
             if normal_score > 0.80: ratio_80 += 1
-
+ 
             # if aligned string is '|' only (image is likely to be a blank image)
             if correct_sent=='|':
                 correct_sent = ''
@@ -515,7 +527,7 @@ def mp_parse():
 
     # single process
     LIST_ret=[]
-    break_pt = 70
+    break_pt = 133
     for idx, eid in enumerate(LIST_eid[break_pt:]):
         print 'Index: {} / {}'.format(idx+1+break_pt, len(LIST_eid))
         LIST_ret.append(parse_single(eid))
