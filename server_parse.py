@@ -3,8 +3,8 @@
 # ocr text alignment
 # -------------------------------------
 import os, json, cv2, re, time, signal
+import zerorpc, base64, glob, itertools, traceback
 import jellyfish
-import zerorpc, base64, glob, itertools
 import numpy as np
 from multiprocessing import Pool
 
@@ -315,7 +315,7 @@ def parse_single(eid):
     
     TIME_s = time.time()
     c_en_predict = zerorpc.Client(heartbeat=None, timeout=20)
-    c_en_predict.connect('tcp://192.168.1.115:12001')  # en 12001, cn 11001
+    c_en_predict.connect('tcp://192.168.1.115:{}'.format(PORT))  # en 12001, cn 11001
 
     # 1. 将所有图像进行 RPC ocr 识别，得到识别结果
     # 将 sample/*.jpg 替换为给你的 Folders ---
@@ -330,193 +330,207 @@ def parse_single(eid):
     ratio_95 = ratio_90 = ratio_85 = ratio_80 = nb_lines = 0
 
     for idx, FILE_image in enumerate(LIST_test[0:]):
-        # get file info
-        image_name = os.path.basename(FILE_image)
-        exercise_id = image_name[0:10]
-        pic_id = image_name[11:-4]
-        print pic_id
-        global output_text
-        output_text = ''
-        print_and_save('Now processing: {} {} / {}'.format(image_name, idx+1, len(LIST_test)))
-        image_vis = cv2.imread(FILE_image)
-        image     = cv2.imread(FILE_image, 0)
-        align_res = []
-        # -------------------------------------
-        # OCR RPC result
-        # -------------------------------------
-        # 本地 RPC ocr result 地址
-        rpc_dir = './rpc_res/{}'.format(exercise_id)
-        if not os.path.exists(rpc_dir): os.makedirs(rpc_dir)
-        FILE_rpc_ocr = os.path.join(rpc_dir, os.path.basename(FILE_image) + '.rpc.res.json')
-        FILE_new_api_ocr = FILE_image + '.ocr.json'
         try:
-            if os.path.exists(FILE_rpc_ocr) == False:
-                LIST_data = {'fname': os.path.basename(FILE_image), 'img_str': _img_to_str_base64(image)}
-                rpc_ocr_res = c_en_predict.predict_essay(LIST_data, True, [])
-                rpc_ocr_res['data'] = json.loads(rpc_ocr_res['data'])
-                json.dump(rpc_ocr_res, open(FILE_rpc_ocr, 'w'))
-        except: continue
+            # get file info
+            image_name = os.path.basename(FILE_image)
+            exercise_id = image_name[0:10]
+            pic_id = image_name[11:-4]
+            print pic_id
+            global output_text
+            output_text = ''
+            print_and_save('Now processing: {} {} / {}'.format(image_name, idx+1, len(LIST_test)))
+            image_vis = cv2.imread(FILE_image)
+            image     = cv2.imread(FILE_image, 0)
+            align_res = []
+            # -------------------------------------
+            # OCR RPC result
+            # -------------------------------------
+            # 本地 RPC ocr result 地址
+            rpc_dir = './rpc_res/{}'.format(exercise_id)
+            if not os.path.exists(rpc_dir): os.makedirs(rpc_dir)
+            FILE_rpc_ocr = os.path.join(rpc_dir, os.path.basename(FILE_image) + '.rpc.res.json')
+            FILE_new_api_ocr = FILE_image + '.ocr.json'
 
-        # -------------------------------------
-        # load 2 OCR result
-        # -------------------------------------
-        print_and_save(FILE_rpc_ocr)
-        DATA_rpc_json = json.load(open(FILE_rpc_ocr))                          # rpc.ocr.json
-        DATA_new_api_json = json.load(open(FILE_new_api_ocr))                      # ocr.json
+            # -------------------------------------
+            # load new api result
+            # -------------------------------------
+            try:
+                DATA_new_api_json = json.load(open(FILE_new_api_ocr))                      # ocr.json
+            except: 
+                print 'Open new api file of {} failed.'.format(pic_id)
+                continue
 
-        # -------------------------------------
-        # init for msapi result
-        # -------------------------------------
-        # 考虑到标点符号占位问题，将标点作为一个 dict_line 对象加入进去
-        dict_line = dict()
-        rpc_ocr_result = DATA_rpc_json['data']['blocks'][0]
-        for inst in rpc_ocr_result['words']['words']:
-            line_idx = inst['line']
-            if dict_line.has_key(line_idx) == False: dict_line[line_idx] = list()
-            dict_line[line_idx].append(inst)
+            # -------------------------------------
+            # load OCR result
+            # -------------------------------------
+            try:
+                if os.path.exists(FILE_rpc_ocr) == False:
+                    LIST_data = {'fname': os.path.basename(FILE_image), 'img_str': _img_to_str_base64(image)}
+                    rpc_ocr_res = c_en_predict.predict_essay(LIST_data, True, [])
+                    rpc_ocr_res['data'] = json.loads(rpc_ocr_res['data'])
+                    json.dump(rpc_ocr_res, open(FILE_rpc_ocr, 'w'))
+            except: 
+                print 'RPC service failed.'
+                continue
+            print_and_save(FILE_rpc_ocr)
+            DATA_rpc_json = json.load(open(FILE_rpc_ocr))                          # rpc.ocr.json
 
-            # 如单词字符内（如，10th.）有标点符号，则继续 +1
-            if inst['word'] not in ['.', ',', '!', '?']:
-                count_punt = sum([inst['word'].count(p) for p in ['.', ',', '!', '?']])
-                for _ in range(0, count_punt):
-                    dict_line[line_idx].append({'word': 'punt', 'weight': 1.0})
+            # -------------------------------------
+            # init for msapi result
+            # -------------------------------------
+            # 考虑到标点符号占位问题，将标点作为一个 dict_line 对象加入进去
+            dict_line = dict()
+            rpc_ocr_result = DATA_rpc_json['data']['blocks'][0]
+            for inst in rpc_ocr_result['words']['words']:
+                line_idx = inst['line']
+                if dict_line.has_key(line_idx) == False: dict_line[line_idx] = list()
+                dict_line[line_idx].append(inst)
 
-        # -------------------------------------
-        # mapping msapi to rpcapi
-        # -------------------------------------
-        # 将结果映射到同一文本行内，方便后续 alignment
+                # 如单词字符内（如，10th.）有标点符号，则继续 +1
+                if inst['word'] not in ['.', ',', '!', '?']:
+                    count_punt = sum([inst['word'].count(p) for p in ['.', ',', '!', '?']])
+                    for _ in range(0, count_punt):
+                        dict_line[line_idx].append({'word': 'punt', 'weight': 1.0})
 
-        # Think: 可否用 kmeans 聚类方式来搞？
-        rpc_ocr_result['lines'] = [line for line in rpc_ocr_result['lines'] if len(line['text'].strip()) > 0]
-        rpc_ocr_lines = len(rpc_ocr_result['lines'])
-        print_and_save('rpc api get {} lines'.format(rpc_ocr_lines))
+            # -------------------------------------
+            # mapping msapi to rpcapi
+            # -------------------------------------
+            # 将结果映射到同一文本行内，方便后续 alignment
 
-        LIST_line_feature = list()
-        for line_idx, line_ocr in enumerate(rpc_ocr_result['lines']):       # 不考虑 API 识别结果
-            y0_root = line_ocr['top']
-            y1_root = line_ocr['bottom']
-            # LIST_line_feature.append((y0_root, y1_root, y1_root - y0_root))
+            # Think: 可否用 kmeans 聚类方式来搞？
+            rpc_ocr_result['lines'] = [line for line in rpc_ocr_result['lines'] if len(line['text'].strip()) > 0]
+            rpc_ocr_lines = len(rpc_ocr_result['lines'])
+            print_and_save('rpc api get {} lines'.format(rpc_ocr_lines))
 
-        new_api_line_count = len(DATA_new_api_json['recognitionResult']['lines'])
-        if new_api_line_count == 0: continue    # 若为空，跳过
-        print_and_save('new api get {} lines'.format(new_api_line_count))
-        for idx, line_api in enumerate(DATA_new_api_json['recognitionResult']['lines']):
-            y0 = min(line_api['boundingBox'][1], line_api['boundingBox'][3], line_api['boundingBox'][5], line_api['boundingBox'][7])
-            y1 = max(line_api['boundingBox'][1], line_api['boundingBox'][3], line_api['boundingBox'][5], line_api['boundingBox'][7])
-            LIST_line_feature.append((y0, y1, y1 - y0))
+            LIST_line_feature = list()
+            for line_idx, line_ocr in enumerate(rpc_ocr_result['lines']):       # 不考虑 API 识别结果
+                y0_root = line_ocr['top']
+                y1_root = line_ocr['bottom']
+                # LIST_line_feature.append((y0_root, y1_root, y1_root - y0_root))
 
-        # 进行 kmeans?
-        from sklearn.cluster import KMeans
-        X = np.array(list(LIST_line_feature))
-        kmeans = KMeans(n_clusters=min(rpc_ocr_lines, new_api_line_count), random_state=0).fit(X)
-        print_and_save(str(sorted(kmeans.labels_)))
-        kmeans_category_count = len(set(kmeans.labels_))
-        print_and_save('Kmeans labels category count: {}'.format(kmeans_category_count))
-        # 将 cluster label 进行聚类
-        LIST_lines = list()
-        for k in range(0, kmeans_category_count):
-            cluster_lines = [DATA_new_api_json['recognitionResult']['lines'][i] for i, x in enumerate(kmeans.labels_) if x == k]
-            clutser_y = [(i['boundingBox'][1], i['boundingBox'][3], i['boundingBox'][5], i['boundingBox'][7]) for i in cluster_lines]
-            y0 = min([min(i) for i in clutser_y])
-            y1 = max([max(i) for i in clutser_y])
-            clean_text = html_clean(' '.join([i['text'] for i in cluster_lines])), y0, y1
-            print_and_save('{}: {}'.format(k,clean_text))
-            LIST_lines.append((y0, y1, cluster_lines))
+            new_api_line_count = len(DATA_new_api_json['recognitionResult']['lines'])
+            if new_api_line_count == 0 or rpc_ocr_lines == 0: continue    # 若为空，跳过
+            print_and_save('new api get {} lines'.format(new_api_line_count))
+            for idx, line_api in enumerate(DATA_new_api_json['recognitionResult']['lines']):
+                y0 = min(line_api['boundingBox'][1], line_api['boundingBox'][3], line_api['boundingBox'][5], line_api['boundingBox'][7])
+                y1 = max(line_api['boundingBox'][1], line_api['boundingBox'][3], line_api['boundingBox'][5], line_api['boundingBox'][7])
+                LIST_line_feature.append((y0, y1, y1 - y0))
 
-        for line_idx, line_ocr in enumerate(rpc_ocr_result['lines']):
-            nb_lines += 1
-            line_idx += 1 # 代表 line，从 1 开始
-            y0_root = line_ocr['top']
-            y1_root = line_ocr['bottom']
-            line_height = abs(y1_root - y0_root)
-            area_seams = [0, y0_root, 100, y1_root]
-            
-            print_and_save('~~~~~~~~~~~~~~')
-            print_and_save('Index: <<< {} / {} >>>'.format(line_idx, kmeans_category_count))
-            print_and_save('-' * 50)
-            print_and_save('OCR_text: {}'.format(line_ocr['text']))
-            
-            FLAG_found_api_line = False
-            normal_score = 1.0
-            for idx, inst in enumerate(LIST_lines):
-                y0, y1, line_api = inst
+            # 进行 kmeans?
+            from sklearn.cluster import KMeans
+            X = np.array(list(LIST_line_feature))
+            kmeans = KMeans(n_clusters=min(rpc_ocr_lines, new_api_line_count), random_state=0).fit(X)
+            print_and_save(str(sorted(kmeans.labels_)))
+            kmeans_category_count = len(set(kmeans.labels_))
+            print_and_save('Kmeans labels category count: {}'.format(kmeans_category_count))
+            # 将 cluster label 进行聚类
+            LIST_lines = list()
+            for k in range(0, kmeans_category_count):
+                cluster_lines = [DATA_new_api_json['recognitionResult']['lines'][i] for i, x in enumerate(kmeans.labels_) if x == k]
+                clutser_y = [(i['boundingBox'][1], i['boundingBox'][3], i['boundingBox'][5], i['boundingBox'][7]) for i in cluster_lines]
+                y0 = min([min(i) for i in clutser_y])
+                y1 = max([max(i) for i in clutser_y])
+                clean_text = html_clean(' '.join([i['text'] for i in cluster_lines])), y0, y1
+                print_and_save('{}: {}'.format(k,clean_text))
+                LIST_lines.append((y0, y1, cluster_lines))
 
-                line_text = html_clean(' '.join([i['text'] for i in line_api]))
-                str_similar = jellyfish.jaro_distance(line_ocr['text'], line_text)
-                area_api = [0, y0, 100, y1]
-                hit_ratio, _ = IoU(area_seams, area_api)
-                height_diff = abs(abs(y1_root - y0_root) - abs(y1 - y0))
-                if all([str_similar >= 0.7, hit_ratio >= 0.5]):
-                    print_and_save('API_text: {} \tsim: {} ratio: {}'.format(line_text, str_similar, hit_ratio))
-                    # “-”符号在alignment中有特殊含义，先把原文中的此符号转换成^
-                    ocr_text = html_clean(line_ocr['text']).replace('-','^').replace('&', '')
-                    api_text = html_clean(line_text).replace('-','^').replace('&', '')
-                    #SIGALRM is only usable on a unix platform
-                    signal.signal(signal.SIGALRM, timeout)
-                    #change 5 to however many seconds you need
-                    signal.alarm(5)
-                    try:
-                        alignments = pairwise2.align.globalmx(api_text, ocr_text, 2, -3)
-                    except TimeoutException: continue
+            for line_idx, line_ocr in enumerate(rpc_ocr_result['lines']):
+                nb_lines += 1
+                line_idx += 1 # 代表 line，从 1 开始
+                y0_root = line_ocr['top']
+                y1_root = line_ocr['bottom']
+                line_height = abs(y1_root - y0_root)
+                area_seams = [0, y0_root, 100, y1_root]
+                
+                print_and_save('~~~~~~~~~~~~~~')
+                print_and_save('Index: <<< {} / {} >>>'.format(line_idx, kmeans_category_count))
+                print_and_save('-' * 50)
+                print_and_save('OCR_text: {}'.format(line_ocr['text']))
+                
+                FLAG_found_api_line = False
+                normal_score = 1.0
+                for idx, inst in enumerate(LIST_lines):
+                    y0, y1, line_api = inst
 
-                    # alignments = pairwise2.align.globalmx(api_text, ocr_text, 2, -3)
-                    if '' in [api_text.strip(), ocr_text.strip()]: continue
-                    align1, align2, score, begin, end = alignments[-1]
+                    line_text = html_clean(' '.join([i['text'] for i in line_api]))
+                    str_similar = jellyfish.jaro_distance(line_ocr['text'], line_text)
+                    area_api = [0, y0, 100, y1]
+                    hit_ratio, _ = IoU(area_seams, area_api)
+                    height_diff = abs(abs(y1_root - y0_root) - abs(y1 - y0))
+                    if all([str_similar >= 0.7, hit_ratio >= 0.5]):
+                        print_and_save('API_text: {} \tsim: {} ratio: {}'.format(line_text, str_similar, hit_ratio))
+                        # “-”符号在alignment中有特殊含义，先把原文中的此符号转换成^
+                        ocr_text = html_clean(line_ocr['text']).replace('-','^').replace('&', '')
+                        api_text = html_clean(line_text).replace('-','^').replace('&', '')
+                        #SIGALRM is only usable on a unix platform
+                        signal.signal(signal.SIGALRM, timeout)
+                        #change 5 to however many seconds you need
+                        signal.alarm(10)
+                        try:
+                            alignments = pairwise2.align.globalmx(api_text, ocr_text, 2, -3)
+                        except TimeoutException: continue
 
-                    correct_sent, normal_score = format_alignment_index(align1, align2, score, begin, end, dict_line[line_idx])
-                    # undo前面的转换
-                    correct_sent = correct_sent.replace('^', '-')
+                        # alignments = pairwise2.align.globalmx(api_text, ocr_text, 2, -3)
+                        if '' in [api_text.strip(), ocr_text.strip()]: continue
+                        align1, align2, score, begin, end = alignments[-1]
+
+                        correct_sent, normal_score = format_alignment_index(align1, align2, score, begin, end, dict_line[line_idx])
+                        # undo前面的转换
+                        correct_sent = correct_sent.replace('^', '-')
+                        text_width, line_height = get_text_size(correct_sent)
+                        cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
+                        cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
+                        FLAG_found_api_line = True
+                        break
+                if not FLAG_found_api_line:
+                    print_and_save('Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!')
+                    correct_sent = html_clean(line_ocr['text'])  
                     text_width, line_height = get_text_size(correct_sent)
                     cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
                     cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
-                    FLAG_found_api_line = True
-                    break
-            if not FLAG_found_api_line:
-                print_and_save('Warning: No api line found to compare with ocr line(str_smilar or hit ratio not high enough)!')
-                correct_sent = html_clean(line_ocr['text'])  
-                text_width, line_height = get_text_size(correct_sent)
-                cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
-                cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
-            
-            # count normal score 
-            if normal_score > 0.95: ratio_95 += 1
-            if normal_score > 0.90: ratio_90 += 1
-            if normal_score > 0.85: ratio_85 += 1
-            if normal_score > 0.80: ratio_80 += 1
- 
-            # if aligned string is '|' only (image is likely to be a blank image)
-            if correct_sent=='|':
-                correct_sent = ''
-                normal_score = 1
+                
+                # count normal score 
+                if normal_score > 0.95: ratio_95 += 1
+                if normal_score > 0.90: ratio_90 += 1
+                if normal_score > 0.85: ratio_85 += 1
+                if normal_score > 0.80: ratio_80 += 1
 
-            # append the line result to image result
-            line_res = {
-                'line_idx': line_idx,
-                'text': correct_sent,
-                'align_score': normal_score,
-                'filename': line_ocr['filename'],
-                'top': line_ocr['top'],
-                'bottom': line_ocr['bottom']
-            }
-            align_res.append(line_res)
+                # if aligned string is '|' only (image is likely to be a blank image)
+                if correct_sent=='|':
+                    correct_sent = ''
+                    normal_score = 1
 
-        # save essay align result
-        fpath = './dataset/server_data_res/{}'.format(exercise_id)
-        if not os.path.exists(fpath): os.makedirs(fpath)
-        fname = '{}_{}.json'.format(exercise_id, pic_id)
-        json.dump(align_res, open(os.path.join(fpath,fname), 'w'))
+                # append the line result to image result
+                line_res = {
+                    'line_idx': line_idx,
+                    'text': correct_sent,
+                    'align_score': normal_score,
+                    'filename': line_ocr['filename'],
+                    'top': line_ocr['top'],
+                    'bottom': line_ocr['bottom']
+                }
+                align_res.append(line_res)
+
+            # save essay align result
+            fpath = './dataset/server_data_res/{}'.format(exercise_id)
+            if not os.path.exists(fpath): os.makedirs(fpath)
+            fname = '{}_{}.json'.format(exercise_id, pic_id)
+            json.dump(align_res, open(os.path.join(fpath,fname), 'w'))
+        except:
+            print traceback.format_exc()
 
     print '@@@@@@@@@@ Finished {} with total lines: {}. Cost {} s. @@@@@@@@@@'.format(eid, nb_lines, time.time()-TIME_s)
 
     return [ratio_95, ratio_90, ratio_85, ratio_80, nb_lines]
 
+PORT = 12002
 
 def mp_parse():
     # Multiprocessing to parse the data
     LIST_eid_dir = glob.glob(r'/home/ubuntu/Desktop/server_data/output_essay/*')
     LIST_eid = [os.path.basename(item) for item in LIST_eid_dir]
     LIST_eid.sort()
-    LIST_eid = LIST_eid[0:]
+    LIST_eid = LIST_eid[173:]
     print '{} exercises are going to be processed.'.format(len(LIST_eid))
 
     ## Multiprocessing
@@ -527,9 +541,9 @@ def mp_parse():
 
     # single process
     LIST_ret=[]
-    break_pt = 133
+    break_pt = 619
     for idx, eid in enumerate(LIST_eid[break_pt:]):
-        print 'Index: {} / {}'.format(idx+1+break_pt, len(LIST_eid))
+        print 'Port: {}, Index: {} / {}'.format(PORT, idx+1+break_pt, len(LIST_eid))
         LIST_ret.append(parse_single(eid))
 
     # aftermath of the data
