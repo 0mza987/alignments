@@ -567,10 +567,29 @@ def mp_parse():
     print 'total lines: {}'.format(nb_lines)
 
 
-def aftermath():
-    pass
+def filter_by_score(score):
+    
+    line_cnt = 0
+    LIST_exam = glob.glob(r'/home/ubuntu/programs/alignment/dataset/server_data_res/*')
+    filtered_res = []
+    for index, exam in enumerate(LIST_exam[0:]):
+        exam_id = os.path.basename(exam)
+        fpath = './dataset/server_data_res_{}'.format(str(score))
+        if not os.path.exists(fpath): os.makedirs(fpath)
+        print 'Processing exam: {}, {}/{}'.format(exam_id, index+1, len(LIST_exam))
+        LIST_essay_json = glob.glob(r'{}/*.json'.format(exam))
+        for essay_json in LIST_essay_json:
+            essay_data = json.load(open(essay_json))
+            for line in essay_data:
+                if line['align_score'] >= score:
+                    filtered_res.append(line)
+                    line_cnt += 1
+    json.dump(filtered_res, open(os.path.join(fpath, 'ultra_res.json'), 'w'))
+    print 'Total lines: {}'.format(line_cnt)
+                
 
 if __name__ == '__main__':
     output_text = ''
-    mp_parse()
+    # mp_parse()
     # parse_single('0b473b2942')
+    filter_by_score(0)
