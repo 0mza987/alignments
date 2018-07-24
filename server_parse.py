@@ -303,7 +303,6 @@ def print_and_save(text):
     # print text
     # global output_text
     # output_text += text + '\n'
-    # return output_text
     
 class TimeoutException(Exception):
     pass
@@ -523,7 +522,7 @@ def parse_single(eid):
 
     return [ratio_95, ratio_90, ratio_85, ratio_80, nb_lines]
 
-PORT = 12002
+PORT = 12001
 
 def mp_parse():
     # Multiprocessing to parse the data
@@ -541,8 +540,8 @@ def mp_parse():
 
     # single process
     LIST_ret=[]
-    break_pt = 619
-    for idx, eid in enumerate(LIST_eid[break_pt:]):
+    break_pt = 249
+    for idx, eid in enumerate(LIST_eid[break_pt:400]):
         print 'Port: {}, Index: {} / {}'.format(PORT, idx+1+break_pt, len(LIST_eid))
         LIST_ret.append(parse_single(eid))
 
@@ -574,3 +573,4 @@ def aftermath():
 if __name__ == '__main__':
     output_text = ''
     mp_parse()
+    # parse_single('0b473b2942')
