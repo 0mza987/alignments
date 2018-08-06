@@ -40,7 +40,7 @@ def punt_clean(sent):
     """ clean punctuation as OCR formant, such as you? -> you ?
     """
     for punt in ['.', '?', '!']:
-        sent = sent.replace(punt, ' %s ' % punt).replace('  %s  ' % punt, ' %s ' % punt).replace('  %s' % punt, ' %s' % punt).replace('%s  ' % punt, '%s ' % punt)
+        sent = sent.replace(punt, '%s ' % punt).replace('  %s  ' % punt, '%s ' % punt).replace('  %s' % punt, '%s' % punt).replace('%s  ' % punt, '%s ' % punt)
     return sent.strip()
 
 

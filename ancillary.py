@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw, ImageFont
 def get_data_from_api():
     URL = 'http://manhattanic.hexin.im/image/getList?'
     params = {
-        '_limit': 100,
+        '_limit': 5000,
         '_page': 1
     }
     res = requests.get(URL, params=params).json()['data']
