@@ -326,7 +326,7 @@ def parse_single(eid):
     # LIST_test.sort()
     print 'Exercise id: {}, Total image: {}.'.format(eid, len(LIST_test))
     
-    ratio_95 = ratio_90 = ratio_85 = ratio_80 = nb_lines = 0
+    ratio_95 = ratio_90 = ratio_85 = ratio_80 = ratio_minus_1 = nb_lines = 0
 
     for idx, FILE_image in enumerate(LIST_test[0:]):
         try:
@@ -447,7 +447,7 @@ def parse_single(eid):
                 print_and_save('OCR_text: {}'.format(line_ocr['text']))
                 
                 FLAG_found_api_line = False
-                normal_score = 1.0
+                normal_score = -1
                 for idx, inst in enumerate(LIST_lines):
                     y0, y1, line_api = inst
 
@@ -488,16 +488,17 @@ def parse_single(eid):
                     cv2.rectangle(image_vis, (10, y0_root - 10), (10 + text_width, y0_root - 10 + line_height), (255, 180, 0), cv2.FILLED)
                     cv2.putText(image_vis, correct_sent, (10, y0_root + 5), cv2.FONT_HERSHEY_COMPLEX, 0.5, (0, 0, 255), 1)
                 
+                # if aligned string is '|' only (image is likely to be a blank image)
+                if correct_sent=='|':
+                    correct_sent = ''
+                    normal_score = 1
+
                 # count normal score 
                 if normal_score > 0.95: ratio_95 += 1
                 if normal_score > 0.90: ratio_90 += 1
                 if normal_score > 0.85: ratio_85 += 1
                 if normal_score > 0.80: ratio_80 += 1
-
-                # if aligned string is '|' only (image is likely to be a blank image)
-                if correct_sent=='|':
-                    correct_sent = ''
-                    normal_score = 1
+                if normal_score < 0:    ratio_minus_1 += 1
 
                 # append the line result to image result
                 line_res = {
@@ -511,7 +512,7 @@ def parse_single(eid):
                 align_res.append(line_res)
 
             # save essay align result
-            fpath = './dataset/server_data_res/{}'.format(exercise_id)
+            fpath = './dataset/server_data_res_0807/{}'.format(exercise_id)
             if not os.path.exists(fpath): os.makedirs(fpath)
             fname = '{}_{}.json'.format(exercise_id, pic_id)
             json.dump(align_res, open(os.path.join(fpath,fname), 'w'))
@@ -520,7 +521,7 @@ def parse_single(eid):
 
     print '@@@@@@@@@@ Finished {} with total lines: {}. Cost {} s. @@@@@@@@@@'.format(eid, nb_lines, time.time()-TIME_s)
 
-    return [ratio_95, ratio_90, ratio_85, ratio_80, nb_lines]
+    return [ratio_95, ratio_90, ratio_85, ratio_80, ratio_minus_1, nb_lines]
 
 PORT = 12001
 
@@ -529,53 +530,57 @@ def mp_parse():
     LIST_eid_dir = glob.glob(r'/home/ubuntu/Desktop/server_data/output_essay/*')
     LIST_eid = [os.path.basename(item) for item in LIST_eid_dir]
     LIST_eid.sort()
-    LIST_eid = LIST_eid[173:]
+    LIST_eid = LIST_eid[0:]
     print '{} exercises are going to be processed.'.format(len(LIST_eid))
 
-    ## Multiprocessing
-    # p = Pool(1)
-    # LIST_ret = p.map(parse_single, LIST_eid)
-    # p.close()
-    # p.join()
+    # Multiprocessing
+    p = Pool(16)
+    LIST_ret = p.map(parse_single, LIST_eid)
+    p.close()
+    p.join()
 
     # single process
-    LIST_ret=[]
-    break_pt = 249
-    for idx, eid in enumerate(LIST_eid[break_pt:400]):
-        print 'Port: {}, Index: {} / {}'.format(PORT, idx+1+break_pt, len(LIST_eid))
-        LIST_ret.append(parse_single(eid))
+    # LIST_ret=[]
+    # break_pt = 0
+    # for idx, eid in enumerate(LIST_eid[break_pt:]):
+    #     print 'Port: {}, Index: {} / {}'.format(PORT, idx+1+break_pt, len(LIST_eid))
+    #     LIST_ret.append(parse_single(eid))
 
     # aftermath of the data
-    ratio_95 = ratio_90 = ratio_85 = ratio_80 = nb_lines = 0
+    ratio_95 = ratio_90 = ratio_85 = ratio_80 = ratio_minus_1 = nb_lines = 0
 
     for item in LIST_ret:
         ratio_95 += item[0]
         ratio_90 += item[1]
         ratio_85 += item[2]
         ratio_80 += item[3]
-        nb_lines += item[4]
+        ratio_minus_1 += item[4]
+        nb_lines += item[5]
 
     ratio_95 /= (1.0 * nb_lines)
     ratio_90 /= (1.0 * nb_lines)
     ratio_85 /= (1.0 * nb_lines)
     ratio_80 /= (1.0 * nb_lines)
+    ratio_minus_1 /= (1.0 * nb_lines)
 
     print 'Above 0.95:', ratio_95
     print 'Above 0.90:', ratio_90
     print 'Above 0.85:', ratio_85
     print 'Above 0.80:', ratio_80
+    print 'Below 0:', ratio_minus_1
     print 'total lines: {}'.format(nb_lines)
 
 
 def filter_by_score(score):
     
     line_cnt = 0
-    LIST_exam = glob.glob(r'/home/ubuntu/programs/alignment/dataset/server_data_res/*')
+    LIST_exam = glob.glob(r'/home/ubuntu/programs/alignment/dataset/server_data_res_0807/*')
+    fpath = './dataset/server_data_res_condensed'
+    if not os.path.exists(fpath): os.makedirs(fpath)
+
     filtered_res = []
     for index, exam in enumerate(LIST_exam[0:]):
         exam_id = os.path.basename(exam)
-        fpath = './dataset/server_data_res_{}'.format(str(score))
-        if not os.path.exists(fpath): os.makedirs(fpath)
         print 'Processing exam: {}, {}/{}'.format(exam_id, index+1, len(LIST_exam))
         LIST_essay_json = glob.glob(r'{}/*.json'.format(exam))
         for essay_json in LIST_essay_json:
@@ -584,7 +589,7 @@ def filter_by_score(score):
                 if line['align_score'] >= score:
                     filtered_res.append(line)
                     line_cnt += 1
-    json.dump(filtered_res, open(os.path.join(fpath, 'ultra_res.json'), 'w'))
+    json.dump(filtered_res, open(os.path.join(fpath, 'ultra_res_above_80_0808.json'), 'w'))
     print 'Total lines: {}'.format(line_cnt)
                 
 
@@ -592,4 +597,4 @@ if __name__ == '__main__':
     output_text = ''
     # mp_parse()
     # parse_single('0b473b2942')
-    filter_by_score(0)
+    filter_by_score(0.80)

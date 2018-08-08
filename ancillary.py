@@ -1,9 +1,12 @@
+# -*-coding:utf-8-*-
+
 import os, json, cv2, requests
 import numpy as np
 
 from PIL import Image, ImageDraw, ImageFont
 
 def get_data_from_api():
+    # 获取kd数据文件存为json
     URL = 'http://manhattanic.hexin.im/image/getList?'
     params = {
         '_limit': 5000,
@@ -12,8 +15,8 @@ def get_data_from_api():
     res = requests.get(URL, params=params).json()['data']
     json.dump(res, open('./dataset/kd_page_11.json', 'w'))
 
-    # for item in res:
-    #     get_img(item['url'])
+    for item in res:
+        get_img(item['url'])
 
 
 def get_img(url):
@@ -36,16 +39,19 @@ def get_img(url):
 
 
 def draw_image(img, x1, y1, x2, y2, text):
-    ''' draw rectangles and text '''
+    ''' draw text(Chinese or English) '''
+    
+    # 1. write English text
     # cv2.rectangle(img, (x1,y1), (x2,y2), (0,0,255), 3)
     # get text_width and text_height
     # text_size, _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_COMPLEX, 0.5, 1)
     # text_width, text_height = text_size
     # cv2.rectangle(img, (x1,y2),(x1+text_width+1,y2+text_height+10), (255,255,255), cv2.FILLED)
-    cv2.rectangle(img, (x1,y2-5),(x1+int(abs(x2-x1)*0.5),y2+int(abs(y2-y1)*0.3)), (255,255,255), cv2.FILLED)
+    #cv2.rectangle(img, (x1,y2-5),(x1+int(abs(x2-x1)*0.5),y2+int(abs(y2-y1)*0.3)), (255,255,255), cv2.FILLED)
     # cv2.putText(img, str(x1), (x1, y2+15), cv2.FONT_HERSHEY_COMPLEX, 0.5, (255,0,0), thickness=1, lineType=cv2.LINE_AA)
 
-    # write Chinese on image
+    # 2. write Chinese on image
+    cv2.rectangle(img, (x1,y2-5),(x1+int(abs(x2-x1)*0.5),y2+int(abs(y2-y1)*0.3)), (255,255,255), cv2.FILLED)
     img_PIL = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     font = ImageFont.truetype('NotoSansCJK-Black.ttc', 20)
     position = (x1,y2-10)
@@ -58,6 +64,10 @@ def draw_image(img, x1, y1, x2, y2, text):
 
 
 def visualize_image():
+    '''
+    draw text on the image
+    firstly draw all rectangles and then draw text
+    '''
     LIST_kd = json.load(open('./dataset/kd_page_1.json'))
     for item in LIST_kd[0:]:
         fname = os.path.basename(item['url'])
