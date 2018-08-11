@@ -27,6 +27,7 @@ LIST_not_in_k12 = ['frost', 'torn', 'pus']
 from Bio.pairwise2 import format_alignment
 from Bio import pairwise2
 
+PUNCT = [',', '.', '?', ':', '!', ';']
 
 def _img_to_str_base64(image):
     """ convert image to base64 string 
@@ -36,11 +37,15 @@ def _img_to_str_base64(image):
     return img_base64
 
 
-def punt_clean(sent):
-    """ clean punctuation as OCR formant, such as you? -> you ?
+def punct_clean(sent):
+    """ clean punctuation as OCR formant, such as "you ? -> you?"
     """
-    for punt in ['.', '?', '!']:
-        sent = sent.replace(punt, '%s ' % punt).replace('  %s  ' % punt, '%s ' % punt).replace('  %s' % punt, '%s' % punt).replace('%s  ' % punt, '%s ' % punt)
+    for punct in PUNCT:
+        sent = sent.replace('  %s' % punct, punct)
+        sent = sent.replace(' %s' % punct, punct)
+        sent = sent.replace(punct, '%s ' % punct)
+        sent = sent.replace('%s   ' % punct, '%s ' % punct)
+        sent = sent.replace('%s  ' % punct, '%s ' % punct)
     return sent.strip()
 
 
@@ -110,6 +115,11 @@ def format_alignment_index(align1, align2, score, begin, end, line_data):
     """ use Bio.pairwise2.format_alignment as reference
         http://biopython.org/DIST/docs/api/Bio.pairwise2-pysrc.html#format_alignment
     """
+
+    end = len(align2.strip('-'))
+    end += 1 if (len(align1)>end and align1[end] in PUNCT) else 0
+    align1 = align1[begin:end]
+    align2 = align2[begin:end]
     break_idx = list()
 
     s = []
@@ -512,7 +522,7 @@ def parse_single(eid):
                 align_res.append(line_res)
 
             # save essay align result
-            fpath = './dataset/server_data_res_0807/{}'.format(exercise_id)
+            fpath = './dataset/server_data_res_0811/{}'.format(exercise_id)
             if not os.path.exists(fpath): os.makedirs(fpath)
             fname = '{}_{}.json'.format(exercise_id, pic_id)
             json.dump(align_res, open(os.path.join(fpath,fname), 'w'))
@@ -572,9 +582,9 @@ def mp_parse():
 
 
 def filter_by_score(score):
-    
+    '''condense essay data to one large json and select with score'''
     line_cnt = 0
-    LIST_exam = glob.glob(r'/home/ubuntu/programs/alignment/dataset/server_data_res_0807/*')
+    LIST_exam = glob.glob(r'/home/ubuntu/programs/alignment/dataset/server_data_res_0811/*')
     fpath = './dataset/server_data_res_condensed'
     if not os.path.exists(fpath): os.makedirs(fpath)
 
@@ -589,12 +599,12 @@ def filter_by_score(score):
                 if line['align_score'] >= score:
                     filtered_res.append(line)
                     line_cnt += 1
-    json.dump(filtered_res, open(os.path.join(fpath, 'ultra_res_above_80_0808.json'), 'w'))
+    json.dump(filtered_res, open(os.path.join(fpath, 'ultra_res_above_0_0811.json'), 'w'))
     print 'Total lines: {}'.format(line_cnt)
                 
 
 if __name__ == '__main__':
     output_text = ''
-    # mp_parse()
+    mp_parse()
     # parse_single('0b473b2942')
-    filter_by_score(0.80)
+    # filter_by_score(0)
