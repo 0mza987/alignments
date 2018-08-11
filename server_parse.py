@@ -116,6 +116,7 @@ def format_alignment_index(align1, align2, score, begin, end, line_data):
         http://biopython.org/DIST/docs/api/Bio.pairwise2-pysrc.html#format_alignment
     """
 
+    # set alignment result's length be subject to ocr length
     end = len(align2.strip('-'))
     end += 1 if (len(align1)>end and align1[end] in PUNCT) else 0
     align1 = align1[begin:end]
@@ -536,7 +537,8 @@ def parse_single(eid):
 PORT = 12001
 
 def mp_parse():
-    # Multiprocessing to parse the data
+    '''Multiprocessing to parse the data'''
+
     LIST_eid_dir = glob.glob(r'/home/ubuntu/Desktop/server_data/output_essay/*')
     LIST_eid = [os.path.basename(item) for item in LIST_eid_dir]
     LIST_eid.sort()

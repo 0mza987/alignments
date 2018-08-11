@@ -103,8 +103,7 @@ def correction(align1, align2, line_data):
         p = p.replace('-', '')
         if t==p: 
             correct_str.append(t)
-        # elif line_data[t] > line_data[p]:
-        elif 2>1:
+        elif line_data[t] > line_data[p]:
             correct_str.append(t)
         else:
             correct_str.append(p)
